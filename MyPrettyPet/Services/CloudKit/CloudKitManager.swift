@@ -15,25 +15,49 @@ class CloudKitManager: ObservableObject {
     static let shared = CloudKitManager()
     
     // MARK: - Properties
-    private let container: CKContainer
-    private let privateDatabase: CKDatabase
-    private let sharedDatabase: CKDatabase
+    private var container: CKContainer?
+    private var privateDatabase: CKDatabase?
+    private var sharedDatabase: CKDatabase?
     
     @Published var isSignedInToiCloud: Bool = false
     @Published var userRecordID: CKRecord.ID?
     @Published var userName: String?
+    @Published var isCloudKitAvailable: Bool = false
     
     // MARK: - Init
     private init() {
+        // НЕ викликаємо setupCloudKit() тут!
+        // Він викличеться коли треба
+    }
+    
+    private func setupCloudKit() {
+        guard container == nil else { return } // Вже налаштовано
+        
+        // Просто створюємо контейнер
         self.container = CKContainer.default()
-        self.privateDatabase = container.privateCloudDatabase
-        self.sharedDatabase = container.sharedCloudDatabase
+        self.privateDatabase = container?.privateCloudDatabase
+        self.sharedDatabase = container?.sharedCloudDatabase
+        self.isCloudKitAvailable = true
         
         checkiCloudStatus()
     }
     
     // MARK: - iCloud Status
     func checkiCloudStatus() {
+        // Спробуємо налаштувати CloudKit при першому виклику
+        if container == nil {
+            setupCloudKit()
+        }
+        
+        guard let container = container else {
+            print("⚠️ CloudKit not configured")
+            DispatchQueue.main.async {
+                self.isSignedInToiCloud = false
+                self.isCloudKitAvailable = false
+            }
+            return
+        }
+        
         container.accountStatus { [weak self] status, error in
             DispatchQueue.main.async {
                 switch status {
@@ -62,6 +86,8 @@ class CloudKitManager: ObservableObject {
     
     // MARK: - Fetch User Identity
     private func fetchUserIdentity() {
+        guard let container = container else { return }
+        
         container.fetchUserRecordID { [weak self] recordID, error in
             if let error = error {
                 print("❌ Error fetching user record ID: \(error)")
@@ -74,7 +100,7 @@ class CloudKitManager: ObservableObject {
                 self?.userRecordID = recordID
             }
             
-            self?.container.discoverUserIdentity(withUserRecordID: recordID) { identity, error in
+            container.discoverUserIdentity(withUserRecordID: recordID) { identity, error in
                 if let error = error {
                     print("❌ Error discovering user identity: \(error)")
                     return
@@ -91,10 +117,18 @@ class CloudKitManager: ObservableObject {
     // MARK: - CRUD Operations
     
     func save<T>(_ item: T, completion: @escaping (Result<T, Error>) -> Void) where T: AnyObject {
-        
+        guard isCloudKitAvailable else {
+            completion(.failure(CloudKitError.iCloudAccountNotAvailable))
+            return
+        }
     }
     
     func fetch<T>(recordID: CKRecord.ID, completion: @escaping (Result<T, Error>) -> Void) {
+        guard isCloudKitAvailable, let privateDatabase = privateDatabase else {
+            completion(.failure(CloudKitError.iCloudAccountNotAvailable))
+            return
+        }
+        
         privateDatabase.fetch(withRecordID: recordID) { record, error in
             if let error = error {
                 completion(.failure(error))
@@ -105,11 +139,15 @@ class CloudKitManager: ObservableObject {
                 completion(.failure(NSError(domain: "CloudKitManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "No record found"])))
                 return
             }
-            
         }
     }
     
     func delete(recordID: CKRecord.ID, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard isCloudKitAvailable, let privateDatabase = privateDatabase else {
+            completion(.failure(CloudKitError.iCloudAccountNotAvailable))
+            return
+        }
+        
         privateDatabase.delete(withRecordID: recordID) { deletedRecordID, error in
             if let error = error {
                 completion(.failure(error))
@@ -120,6 +158,10 @@ class CloudKitManager: ObservableObject {
     }
     
     func query<T>(recordType: String, predicate: NSPredicate = NSPredicate(value: true), sortDescriptors: [NSSortDescriptor] = [], completion: @escaping (Result<[T], Error>) -> Void) {
+        guard isCloudKitAvailable, let privateDatabase = privateDatabase else {
+            completion(.failure(CloudKitError.iCloudAccountNotAvailable))
+            return
+        }
         
         let query = CKQuery(recordType: recordType, predicate: predicate)
         query.sortDescriptors = sortDescriptors
@@ -134,7 +176,6 @@ class CloudKitManager: ObservableObject {
                 completion(.success([]))
                 return
             }
-            
         }
     }
 }
