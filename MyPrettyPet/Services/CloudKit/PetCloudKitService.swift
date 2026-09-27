@@ -1,10 +1,8 @@
 //
-//  PetCloudKitService.swift
+//  FeedingCloudKitService.swift
 //  MyPrettyPet
-//
 //  Created by Taras Buhra on 07.01.2026.
 //
-
 import Foundation
 import CloudKit
 
@@ -37,7 +35,7 @@ class PetCloudKitService {
                 return
             }
             
-            // Зберігаємо всі зв'язки
+            
             updatedPet.vaccinationIDs = pet.vaccinationIDs
             updatedPet.dewormingIDs = pet.dewormingIDs
             updatedPet.fleaTreatmentIDs = pet.fleaTreatmentIDs
@@ -130,7 +128,7 @@ class PetCloudKitService {
             return
         }
         
-        // Отримуємо запис
+
         privateDatabase.fetch(withRecordID: recordID) { [weak self] record, error in
             if let error = error {
                 DispatchQueue.main.async {
@@ -146,15 +144,14 @@ class PetCloudKitService {
                 return
             }
             
-            // Створюємо share
+
             let share = CKShare(rootRecord: record)
             share[CKShare.SystemFieldKey.title] = "Паспорт \(pet.name)" as CKRecordValue
             share.publicPermission = .none // Тільки запрошені користувачі
             
-            // Налаштування прав для учасників
+
             share[CKShare.SystemFieldKey.shareType] = "Pet Passport" as CKRecordValue
             
-            // Зберігаємо і record і share разом
             let operation = CKModifyRecordsOperation(recordsToSave: [record, share], recordIDsToDelete: nil)
             
             operation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
@@ -189,13 +186,11 @@ class PetCloudKitService {
             return
         }
         
-        // Перевіряємо чи користувач є власником
         if pet.ownerID == currentUserID {
             completion(.success(.owner))
             return
         }
         
-        // Перевіряємо share
         let fetchSharesOperation = CKFetchShareMetadataOperation(shareURLs: [])
         // Тут потрібна додаткова логіка для перевірки share
         // Поки що повертаємо participant
