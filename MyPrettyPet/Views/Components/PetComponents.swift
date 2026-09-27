@@ -17,7 +17,7 @@ struct AppHeader<Trailing: View>: View {
             HStack(alignment: .center) {
                 Text(title)
                     .font(Theme.Fonts.logo)
-                    .foregroundColor(.white)
+                    .foregroundColor(Theme.Colors.gold)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
@@ -31,10 +31,10 @@ struct AppHeader<Trailing: View>: View {
             if let subtitle {
                 Text(subtitle)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(.white.opacity(0.2), in: Capsule())
+                    .background(.white.opacity(0.1), in: Capsule())
             }
         }
         .padding(.horizontal, Theme.Spacing.screen)
@@ -69,9 +69,10 @@ struct HeaderIconLabel: View {
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: 18, weight: .semibold))
-            .foregroundColor(.white)
+            .foregroundColor(Theme.Colors.gold)
             .frame(width: 46, height: 46)
-            .background(.white.opacity(0.2), in: Circle())
+            .background(.white.opacity(0.1), in: Circle())
+            .overlay(Circle().stroke(Theme.Colors.gold.opacity(0.35), lineWidth: 1))
     }
 }
 

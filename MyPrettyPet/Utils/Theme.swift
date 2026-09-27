@@ -17,16 +17,21 @@ struct Theme {
         static let secondary = Color(light: 0x8C7F84, dark: 0xA89CA1)
 
         // Акценти
-        static let accent = Color(hex: 0xD4577A)
+        static let accent = Color(hex: 0xC4506F)
         static let green = Color(hex: 0x4FA889)
         static let blue = Color(hex: 0x6D86D8)
         static let orange = Color(hex: 0xE39A5B)
         static let purple = Color(hex: 0x9C7FD0)
-        static let star = Color(hex: 0xE9A93B)
 
-        // Шапка — сіро-рожева
-        static let header = Color(light: 0xB88A93, dark: 0x5C4148)
-        static let headerDeep = Color(light: 0xA67880, dark: 0x4E363D)
+        // Шампань-золото, як лінія на іконці
+        static let gold = Color(hex: 0xE2BE96)
+        /// Золото для тексту на світлому фоні (контрастніше)
+        static let goldText = Color(light: 0xA27A48, dark: 0xE2BE96)
+        static let goldSoft = Color(light: 0xF6EBDD, dark: 0x3A2E22)
+
+        // Шапка — глибокий сливовий, як фон іконки
+        static let header = Color(light: 0x7E4F5A, dark: 0x4A2F36)
+        static let headerDeep = Color(light: 0x5A3640, dark: 0x36222A)
 
         // Поверхні
         static let background = Color(light: 0xF8F4F5, dark: 0x131012)
@@ -41,8 +46,6 @@ struct Theme {
         static let mintSoft = Color(light: 0xE0F1EA, dark: 0x1F3129)
         static let peachSoft = Color(light: 0xFBEBDD, dark: 0x3A2D22)
         static let lavenderSoft = Color(light: 0xE7E9F8, dark: 0x272A3D)
-        static let lemonSoft = Color(light: 0xF9F0D6, dark: 0x39331F)
-        static let lemonText = Color(light: 0xA7771A, dark: 0xEBC56A)
     }
 
     // MARK: - Fonts

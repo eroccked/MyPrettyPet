@@ -286,7 +286,7 @@ enum QuickAction: CaseIterable, Identifiable {
         case .vaccination: MedicalRecord.Kind.vaccination.color
         case .deworming: MedicalRecord.Kind.deworming.color
         case .flea: MedicalRecord.Kind.fleaTreatment.color
-        case .addPet: Theme.Colors.lemonText
+        case .addPet: Theme.Colors.goldText
         }
     }
 
@@ -296,7 +296,7 @@ enum QuickAction: CaseIterable, Identifiable {
         case .vaccination: MedicalRecord.Kind.vaccination.softColor
         case .deworming: MedicalRecord.Kind.deworming.softColor
         case .flea: MedicalRecord.Kind.fleaTreatment.softColor
-        case .addPet: Theme.Colors.lemonSoft
+        case .addPet: Theme.Colors.goldSoft
         }
     }
 
@@ -361,11 +361,11 @@ struct PetPhotoCard: View {
                         if let badge = badge {
                             Text(badge.text)
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(badge.isAlert ? .white : Theme.Colors.lemonText)
+                                .foregroundColor(badge.isAlert ? .white : Theme.Colors.gold)
                                 .lineLimit(1)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(badge.isAlert ? Color.red.opacity(0.9) : Theme.Colors.lemonSoft, in: Capsule())
+                                .background(badge.isAlert ? Color.red.opacity(0.9) : Theme.Colors.headerDeep.opacity(0.85), in: Capsule())
                                 .padding(10)
                         }
                     }
@@ -400,7 +400,7 @@ struct PetPhotoCard: View {
                     Label("\(pet.todayFeedingCount)", systemImage: "fork.knife")
                         .foregroundColor(Theme.Colors.accent)
                     Label(pet.ageText, systemImage: "birthday.cake.fill")
-                        .foregroundColor(Theme.Colors.star)
+                        .foregroundColor(Theme.Colors.goldText)
                         .lineLimit(1)
                 }
                 .font(.system(size: 12, weight: .semibold))
