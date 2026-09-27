@@ -6,107 +6,100 @@
 //
 
 import Foundation
+import SwiftData
 import UserNotifications
 
-class NotificationManager {
-    
+final class NotificationManager {
+
     static let shared = NotificationManager()
-    
+
+    private let center = UNUserNotificationCenter.current()
+    private let identifierPrefix = "medical-"
+    /// iOS тримає не більше 64 запланованих сповіщень
+    private let maxPendingCount = 60
+
     private init() {}
-    
-    // MARK: - Request Permission
-    func requestAuthorization(completion: @escaping (Bool) -> Void) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if let error = error {
-                print("❌ Error requesting notification permission: \(error)")
-                completion(false)
-                return
-            }
-            
-            DispatchQueue.main.async {
-                completion(granted)
-            }
+
+    // MARK: - Permission
+
+    @discardableResult
+    func requestAuthorization() async -> Bool {
+        do {
+            return try await center.requestAuthorization(options: [.alert, .sound, .badge])
+        } catch {
+            print("❌ Error requesting notification permission: \(error)")
+            return false
         }
     }
-    
-    // MARK: - Schedule Medical Reminder
-    func scheduleMedicalReminder(title: String, body: String, date: Date, identifier: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-        content.badge = 1
-        
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-        
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
+
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        await center.notificationSettings().authorizationStatus
+    }
+
+    // MARK: - Scheduling
+
+    /// Прибрати всі медичні нагадування і запланувати заново з поточних даних.
+    /// Викликається після кожної зміни і при відкритті застосунку (дані могли прийти з iCloud).
+    func rescheduleAll(in context: ModelContext) async {
+        let pending = await center.pendingNotificationRequests()
+        let medicalIDs = pending.map(\.identifier).filter { $0.hasPrefix(identifierPrefix) }
+        center.removePendingNotificationRequests(withIdentifiers: medicalIDs)
+
+        guard AppSettings.isRemindersEnabled else { return }
+
+        let status = await authorizationStatus()
+        guard status == .authorized || status == .provisional else { return }
+
+        let pets = (try? context.fetch(FetchDescriptor<Pet>())) ?? []
+        let requests = pets
+            .flatMap { pet in pet.currentReminders.flatMap { makeRequests(for: $0, petName: pet.name) } }
+            .sorted { $0.date < $1.date }
+            .prefix(maxPendingCount)
+
+        for item in requests {
+            do {
+                try await center.add(item.request)
+            } catch {
                 print("❌ Error scheduling notification: \(error)")
-            } else {
-                print("✅ Notification scheduled: \(title)")
             }
         }
     }
-    
-    // MARK: - Schedule Vaccination Reminder
-    func scheduleVaccinationReminder(vaccination: Vaccination, petName: String, daysBefore: Int = 7) {
-        guard let nextDueDate = vaccination.nextDueDate else { return }
-        
-        let reminderDate = Calendar.current.date(byAdding: .day, value: -daysBefore, to: nextDueDate) ?? nextDueDate
-        
-        let title = "Нагадування про щеплення"
-        let body = "\(petName) потребує щеплення '\(vaccination.vaccineName)' через \(daysBefore) днів"
-        let identifier = "vaccination-\(vaccination.id.uuidString)"
-        
-        scheduleMedicalReminder(title: title, body: body, date: reminderDate, identifier: identifier)
-    }
-    
-    // MARK: - Schedule Deworming Reminder
-    func scheduleDewormingReminder(deworming: Deworming, petName: String, daysBefore: Int = 3) {
-        guard let nextDueDate = deworming.nextDueDate else { return }
-        
-        let reminderDate = Calendar.current.date(byAdding: .day, value: -daysBefore, to: nextDueDate) ?? nextDueDate
-        
-        let title = "Нагадування про глистування"
-        let body = "\(petName) потребує глистування через \(daysBefore) днів"
-        let identifier = "deworming-\(deworming.id.uuidString)"
-        
-        scheduleMedicalReminder(title: title, body: body, date: reminderDate, identifier: identifier)
-    }
-    
-    // MARK: - Schedule Flea Treatment Reminder
-    func scheduleFleaTreatmentReminder(fleaTreatment: FleaTreatment, petName: String, daysBefore: Int = 3) {
-        guard let nextDueDate = fleaTreatment.nextDueDate else { return }
-        
-        let reminderDate = Calendar.current.date(byAdding: .day, value: -daysBefore, to: nextDueDate) ?? nextDueDate
-        
-        let title = "Нагадування про обробку від бліх"
-        let body = "\(petName) потребує обробку від бліх через \(daysBefore) днів"
-        let identifier = "flea-\(fleaTreatment.id.uuidString)"
-        
-        scheduleMedicalReminder(title: title, body: body, date: reminderDate, identifier: identifier)
-    }
-    
-    // MARK: - Cancel Notification
-    func cancelNotification(identifier: String) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
-    }
-    
-    // MARK: - Cancel All Notifications
-    func cancelAllNotifications() {
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
-    }
-    
-    // MARK: - Get Pending Notifications
-    func getPendingNotifications(completion: @escaping ([UNNotificationRequest]) -> Void) {
-        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
-            DispatchQueue.main.async {
-                completion(requests)
-            }
+
+    private func makeRequests(for record: MedicalRecord, petName: String) -> [(date: Date, request: UNNotificationRequest)] {
+        guard let dueDate = record.nextDueDate else { return [] }
+
+        let calendar = Calendar.current
+        let hour = AppSettings.reminderHourValue
+        let daysBefore = AppSettings.reminderDaysBeforeValue
+
+        var triggers: [(suffix: String, date: Date?, body: String)] = [
+            ("due", calendar.date(bySettingHour: hour, minute: 0, second: 0, of: dueDate),
+             "Сьогодні час: \(record.kind.title.lowercased()) «\(record.name)» для \(petName)"),
+        ]
+        if daysBefore > 0 {
+            let before = calendar.date(byAdding: .day, value: -daysBefore, to: dueDate) ?? dueDate
+            triggers.append((
+                "before",
+                calendar.date(bySettingHour: hour, minute: 0, second: 0, of: before),
+                "Через \(daysBefore) дн.: \(record.kind.title.lowercased()) «\(record.name)» для \(petName)"
+            ))
+        }
+
+        return triggers.compactMap { trigger in
+            guard let date = trigger.date, date > Date() else { return nil }
+
+            let content = UNMutableNotificationContent()
+            content.title = record.kind.title
+            content.body = trigger.body
+            content.sound = .default
+
+            let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+            let request = UNNotificationRequest(
+                identifier: "\(identifierPrefix)\(record.id.uuidString)-\(trigger.suffix)",
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            )
+            return (date, request)
         }
     }
 }

@@ -6,300 +6,366 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct PetDetailView: View {
     let pet: Pet
-    @StateObject private var viewModel: PetViewModel
+
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppChrome.self) private var chrome
+
     @State private var showFeedingSheet = false
     @State private var showEditSheet = false
-    
-    init(pet: Pet) {
-        self.pet = pet
-        self._viewModel = StateObject(wrappedValue: PetViewModel(pet: pet))
-    }
-    
+    @State private var showDeleteConfirmation = false
+    @State private var addingMedicalKind: MedicalRecord.Kind?
+
+    private let heroHeight: CGFloat = 400
+
     var body: some View {
-        ZStack {
-            Theme.Colors.background
-                .ignoresSafeArea()
-            
-            ScrollView {
-                VStack(spacing: Theme.Spacing.large) {
-                    // Фото та основна інфа
-                    PetHeaderSection(pet: viewModel.pet ?? pet)
-                    
-                    // Швидкі дії
-                    QuickActionsSection(
-                        onFeed: { showFeedingSheet = true },
-                        onEdit: { showEditSheet = true }
-                    )
-                    
-                    // Статистика годування
-                    FeedingStatsSection(
-                        todayCount: viewModel.todayFeedingCount,
-                        lastFeeding: viewModel.lastFeeding
-                    )
-                    
-                    // Паспортні дані
-                    PassportInfoSection(pet: viewModel.pet ?? pet)
-                    
-                    // Медичні нагадування
-                    MedicalRemindersSection(pet: viewModel.pet ?? pet)
-                    
-                    Spacer(minLength: 100)
+        ScrollView {
+            VStack(spacing: 0) {
+                hero
+
+                VStack(alignment: .leading, spacing: 24) {
+                    titleRow
+                    Divider()
+                    infoTiles
+                    FeedingSummaryBlock(pet: pet)
+                    MedicalSummaryBlock(pet: pet) { addingMedicalKind = $0 }
+                    PassportBlock(pet: pet)
                 }
-                .padding(.bottom, 80)
+                .padding(.horizontal, Theme.Spacing.screen)
+                .padding(.top, 28)
+                .padding(.bottom, 110)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Theme.Colors.cardBackground,
+                    in: UnevenRoundedRectangle(topLeadingRadius: 32, topTrailingRadius: 32, style: .continuous)
+                )
+                .padding(.top, -36)
             }
         }
-        .navigationTitle(pet.name)
+        .scrollIndicators(.hidden)
+        .background(Theme.Colors.cardBackground)
+        .ignoresSafeArea(edges: .top)
+        .overlay(alignment: .bottom) {
+            Button {
+                showFeedingSheet = true
+            } label: {
+                Label("Погодувати", systemImage: "fork.knife")
+                    .primaryButtonStyle()
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Theme.Spacing.screen)
+            .padding(.bottom, 8)
+        }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showEditSheet = true
+                    } label: {
+                        Label("Редагувати", systemImage: "square.and.pencil")
+                    }
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Видалити", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+            }
+        }
+        .onAppear { chrome.isTabBarHidden = true }
+        .onDisappear { chrome.isTabBarHidden = false }
         .sheet(isPresented: $showFeedingSheet) {
-            QuickFeedingSheet(pet: viewModel.pet ?? pet)
+            FeedingFormView(pet: pet)
         }
         .sheet(isPresented: $showEditSheet) {
-            AddPetView()
+            PetFormView(pet: pet)
         }
-        .onAppear {
-            viewModel.loadPetData(for: pet)
+        .sheet(item: $addingMedicalKind) { kind in
+            MedicalRecordFormView(pet: pet, kind: kind)
+        }
+        .confirmationDialog("Видалити \(pet.name)?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Видалити", role: .destructive) {
+                deletePet()
+            }
+        } message: {
+            Text("Усі записи годування та медичні записи теж буде видалено.")
         }
     }
-}
 
-// MARK: - Pet Header Section
-struct PetHeaderSection: View {
-    let pet: Pet
-    
-    var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            // Фото
-            if let photoData = pet.photoData, let uiImage = UIImage(data: photoData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 150, height: 150)
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(Theme.Colors.accent.opacity(0.3), lineWidth: 4)
-                    )
-                    .shadow(color: Theme.Shadow.medium.color,
-                           radius: Theme.Shadow.medium.radius,
-                           x: Theme.Shadow.medium.x,
-                           y: Theme.Shadow.medium.y)
-            } else {
-                Circle()
-                    .fill(Theme.Colors.accent.opacity(0.2))
-                    .frame(width: 150, height: 150)
-                    .overlay(
-                        Image(systemName: "pawprint.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(Theme.Colors.accent)
-                    )
-            }
-            
-            // Основна інфа
-            VStack(spacing: 8) {
+    // MARK: - Hero
+
+    /// Фото на всю ширину, що розтягується при потягуванні вниз
+    private var hero: some View {
+        GeometryReader { geometry in
+            let pull = max(geometry.frame(in: .scrollView).minY, 0)
+
+            PetPhotoView(photoData: pet.photoData, iconSize: 90)
+                .frame(width: geometry.size.width, height: heroHeight + pull)
+                .clipped()
+                .overlay(alignment: .top) {
+                    // Затемнення під статус-бар і кнопки навігації
+                    LinearGradient(colors: [.black.opacity(0.45), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 140)
+                }
+                .offset(y: -pull)
+        }
+        .frame(height: heroHeight)
+    }
+
+    // MARK: - Title
+
+    private var titleRow: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.medium) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(pet.name)
                     .font(Theme.Fonts.largeTitle)
                     .foregroundColor(Theme.Colors.primary)
-                
-                HStack(spacing: 4) {
-                    Text(pet.species)
-                    Text("•")
-                    Text(petAge(pet.dateOfBirth))
-                    Text("•")
-                    Text(pet.gender.rawValue)
-                }
-                .font(Theme.Fonts.body)
-                .foregroundColor(Theme.Colors.secondary)
-                
-                Text(pet.breed)
-                    .font(Theme.Fonts.subheadline)
-                    .foregroundColor(Theme.Colors.secondary)
-            }
-        }
-        .padding(.top, Theme.Spacing.large)
-    }
-    
-    private func petAge(_ birthDate: Date) -> String {
-        let age = Calendar.current.dateComponents([.year, .month], from: birthDate, to: Date())
-        
-        if let years = age.year, years > 0 {
-            if let months = age.month, months > 0 {
-                return "\(years) р. \(months) міс."
-            }
-            return "\(years) р."
-        } else if let months = age.month, months > 0 {
-            return "\(months) міс."
-        }
-        return "Новонароджений"
-    }
-}
 
-// MARK: - Quick Actions Section
-struct QuickActionsSection: View {
-    let onFeed: () -> Void
-    let onEdit: () -> Void
-    
-    var body: some View {
-        HStack(spacing: Theme.Spacing.medium) {
-            // Погодувати
-            Button(action: onFeed) {
-                HStack {
-                    Image(systemName: "fork.knife.circle.fill")
-                        .font(.system(size: 24))
-                    Text("Погодувати")
-                        .font(Theme.Fonts.headline)
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Theme.Spacing.medium)
-                .background(Theme.Colors.accent)
-                .cornerRadius(Theme.CornerRadius.medium)
-            }
-            
-            // Редагувати
-            Button(action: onEdit) {
-                HStack {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 24))
-                    Text("Редагувати")
-                        .font(Theme.Fonts.headline)
-                }
-                .foregroundColor(Theme.Colors.primary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Theme.Spacing.medium)
-                .background(Theme.Colors.cardBackground)
-                .cornerRadius(Theme.CornerRadius.medium)
-                .shadow(color: Theme.Shadow.small.color,
-                       radius: Theme.Shadow.small.radius)
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.medium)
-    }
-}
-
-// MARK: - Feeding Stats Section
-struct FeedingStatsSection: View {
-    let todayCount: Int
-    let lastFeeding: FeedingRecord?
-    
-    var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            HStack {
-                Text("Годування сьогодні")
-                    .font(Theme.Fonts.headline)
-                    .foregroundColor(Theme.Colors.primary)
-                Spacer()
-            }
-            .padding(.horizontal, Theme.Spacing.medium)
-            
-            HStack(spacing: Theme.Spacing.medium) {
-                // Кількість сьогодні
-                StatCard(
-                    icon: "fork.knife",
-                    value: "\(todayCount)",
-                    label: "разів сьогодні",
-                    color: Theme.Colors.accent
+                Label(
+                    [pet.species, pet.breed].filter { !$0.isEmpty }.joined(separator: " • "),
+                    systemImage: "pawprint"
                 )
-                
-                // Останнє годування
-                if let lastFeeding = lastFeeding {
-                    StatCard(
-                        icon: "clock",
-                        value: timeAgo(lastFeeding.dateTime),
-                        label: "востаннє",
-                        color: .green
-                    )
-                } else {
-                    StatCard(
-                        icon: "clock",
-                        value: "Немає",
-                        label: "записів",
-                        color: .gray
-                    )
-                }
+                .font(Theme.Fonts.subheadline)
+                .foregroundColor(Theme.Colors.secondary)
             }
-            .padding(.horizontal, Theme.Spacing.medium)
+
+            Spacer()
+
+            Text(pet.gender.symbol)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(pet.gender.tint)
+                .frame(width: 56, height: 56)
+                .background(pet.gender.softColor, in: Circle())
+                .accessibilityLabel(pet.gender.title)
         }
     }
-    
-    private func timeAgo(_ date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        let hours = Int(interval / 3600)
-        let minutes = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
-        
-        if hours > 0 {
-            return "\(hours) год"
-        } else if minutes > 0 {
-            return "\(minutes) хв"
-        } else {
-            return "Щойно"
+
+    // MARK: - Info Tiles
+
+    private var infoTiles: some View {
+        HStack(spacing: 12) {
+            InfoTile(label: "Стать", value: pet.gender.title)
+            InfoTile(label: "Вік", value: pet.ageText)
+            InfoTile(label: "Колір", value: pet.furColor.isEmpty ? "—" : pet.furColor)
+        }
+    }
+
+    // MARK: - Delete
+
+    private func deletePet() {
+        dismiss()
+        // Видаляємо після закриття екрана, щоб він не звертався до видаленого об'єкта
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            context.delete(pet)
+            context.saveChanges()
         }
     }
 }
 
-// MARK: - Stat Card
-struct StatCard: View {
-    let icon: String
-    let value: String
+// MARK: - Gender Style
+private extension Pet.Gender {
+    var symbol: String {
+        switch self {
+        case .male: "♂"
+        case .female: "♀"
+        case .unknown: "?"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .male: Theme.Colors.blue
+        case .female: Theme.Colors.accent
+        case .unknown: Theme.Colors.secondary
+        }
+    }
+
+    var softColor: Color {
+        switch self {
+        case .male: Theme.Colors.lavenderSoft
+        case .female: Theme.Colors.pinkSoft
+        case .unknown: Theme.Colors.background
+        }
+    }
+}
+
+// MARK: - Info Tile
+struct InfoTile: View {
     let label: String
-    let color: Color
-    
+    let value: String
+
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 30))
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(Theme.Fonts.title)
-                .foregroundColor(Theme.Colors.primary)
-            
+        VStack(spacing: 6) {
             Text(label)
-                .font(Theme.Fonts.caption)
+                .font(Theme.Fonts.footnote)
                 .foregroundColor(Theme.Colors.secondary)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(Theme.Colors.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.medium)
-        .cardStyle()
+        .padding(.vertical, 14)
+        .padding(.horizontal, 6)
+        .outlinedStyle(cornerRadius: Theme.CornerRadius.large)
     }
 }
 
-// MARK: - Passport Info Section
-struct PassportInfoSection: View {
+// MARK: - Feeding Summary
+struct FeedingSummaryBlock: View {
     let pet: Pet
-    
+
     var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            HStack {
-                Text("Паспортні дані")
-                    .font(Theme.Fonts.headline)
-                    .foregroundColor(Theme.Colors.primary)
-                Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle(title: "Годування")
+
+            HStack(spacing: 14) {
+                Image(systemName: "fork.knife")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+                    .frame(width: 52, height: 52)
+                    .background(Theme.Colors.pinkSoft, in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Сьогодні: \(pet.todayFeedingCount)")
+                        .font(Theme.Fonts.headline)
+                        .foregroundColor(Theme.Colors.primary)
+                    Text(pet.lastFeeding.map { "Востаннє: \($0.foodName), \($0.dateTime.timeAgo().lowercased())" } ?? "Ще не годували")
+                        .font(Theme.Fonts.footnote)
+                        .foregroundColor(Theme.Colors.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+
+                NavigationLink {
+                    FeedingHistoryScreen(pet: pet)
+                } label: {
+                    RoundIconLabel(systemImage: "list.bullet")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Історія годування")
             }
-            .padding(.horizontal, Theme.Spacing.medium)
-            
-            VStack(spacing: Theme.Spacing.small) {
-                InfoRow(icon: "paintpalette.fill", label: "Колір шерсті", value: pet.furColor)
-                
+            .padding(14)
+            .outlinedStyle()
+        }
+    }
+}
+
+// MARK: - Medical Summary
+struct MedicalSummaryBlock: View {
+    let pet: Pet
+    let onAdd: (MedicalRecord.Kind) -> Void
+
+    var body: some View {
+        let upcoming = Array(pet.upcomingReminders.prefix(3))
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionTitle(title: "Медичне")
+                Spacer()
+                NavigationLink {
+                    MedicalRecordsScreen(pet: pet)
+                } label: {
+                    Text("Усі записи")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                }
+            }
+
+            VStack(spacing: 0) {
+                if upcoming.isEmpty {
+                    HStack(spacing: 14) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(Theme.Colors.green)
+                            .frame(width: 52, height: 52)
+                            .background(Theme.Colors.mintSoft, in: Circle())
+                        Text("Найближчим часом процедур немає")
+                            .font(Theme.Fonts.subheadline)
+                            .foregroundColor(Theme.Colors.secondary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 14)
+                } else {
+                    ForEach(upcoming) { record in
+                        MedicalRecordRow(record: record, showsDueDate: true)
+                            .padding(.vertical, 12)
+                        if record.id != upcoming.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .outlinedStyle()
+
+            HStack(spacing: 8) {
+                ForEach(MedicalRecord.Kind.allCases) { kind in
+                    Button {
+                        onAdd(kind)
+                    } label: {
+                        Label(kind.shortTitle, systemImage: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(kind.color)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(kind.softColor, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Passport
+struct PassportBlock: View {
+    let pet: Pet
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle(title: "Паспорт")
+
+            VStack(spacing: 12) {
+                InfoRow(icon: "calendar", label: "Дата народження", value: pet.dateOfBirth.toMediumString())
+
+                if !pet.breed.isEmpty {
+                    Divider()
+                    InfoRow(icon: "pawprint.fill", label: "Порода", value: pet.breed)
+                }
+
                 if let microchipNumber = pet.microchipNumber {
                     Divider()
                     InfoRow(icon: "barcode", label: "Мікрочіп", value: microchipNumber)
-                    
                     if let microchipLocation = pet.microchipLocation {
-                        InfoRow(icon: "location.fill", label: "Розташування", value: microchipLocation, isIndented: true)
+                        InfoRow(icon: "", label: "Розташування", value: microchipLocation, isIndented: true)
+                    }
+                    if let microchipDate = pet.microchipDate {
+                        InfoRow(icon: "", label: "Дата", value: microchipDate.toMediumString(), isIndented: true)
                     }
                 }
-                
+
                 if let tattooNumber = pet.tattooNumber {
                     Divider()
                     InfoRow(icon: "number", label: "Тату", value: tattooNumber)
+                    if let tattooDate = pet.tattooDate {
+                        InfoRow(icon: "", label: "Дата", value: tattooDate.toMediumString(), isIndented: true)
+                    }
                 }
             }
-            .padding(Theme.Spacing.medium)
-            .cardStyle()
-            .padding(.horizontal, Theme.Spacing.medium)
+            .padding(14)
+            .outlinedStyle()
         }
     }
 }
@@ -310,129 +376,42 @@ struct InfoRow: View {
     let label: String
     let value: String
     var isIndented: Bool = false
-    
+
     var body: some View {
         HStack(spacing: Theme.Spacing.small) {
-            if !isIndented {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundColor(Theme.Colors.accent)
-                    .frame(width: 20)
-            } else {
-                Spacer()
-                    .frame(width: 20)
+            Group {
+                if isIndented {
+                    Color.clear
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                }
             }
-            
+            .frame(width: 22, height: 22)
+
             Text(label)
                 .font(Theme.Fonts.subheadline)
                 .foregroundColor(Theme.Colors.secondary)
-            
+
             Spacer()
-            
+
             Text(value)
-                .font(Theme.Fonts.body)
+                .font(.system(size: 16, weight: .medium))
                 .foregroundColor(Theme.Colors.primary)
-        }
-    }
-}
-
-// MARK: - Medical Reminders Section
-struct MedicalRemindersSection: View {
-    let pet: Pet
-    @State private var showMedicalView = false
-    
-    var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            HStack {
-                Text("Медичні нагадування")
-                    .font(Theme.Fonts.headline)
-                    .foregroundColor(Theme.Colors.primary)
-                Spacer()
-            }
-            .padding(.horizontal, Theme.Spacing.medium)
-            
-            Button(action: {
-                showMedicalView = true
-            }) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "cross.case.fill")
-                                .foregroundColor(.red)
-                            Text("Медичні записи")
-                                .font(Theme.Fonts.headline)
-                                .foregroundColor(Theme.Colors.primary)
-                        }
-                        
-                        Text("Переглянути всі щеплення, глистування та обробки")
-                            .font(Theme.Fonts.subheadline)
-                            .foregroundColor(Theme.Colors.secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Image(systemName: "chevron.right")
-                        .foregroundColor(Theme.Colors.secondary)
-                }
-                .padding(Theme.Spacing.medium)
-                .cardStyle()
-                .padding(.horizontal, Theme.Spacing.medium)
-            }
-        }
-        .sheet(isPresented: $showMedicalView) {
-            MedicalDetailView(pet: pet)
-        }
-    }
-}
-
-// MARK: - Medical Detail View (Заглушка)
-struct MedicalDetailView: View {
-    let pet: Pet
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Theme.Colors.background
-                    .ignoresSafeArea()
-                
-                VStack {
-                    Text("Медичні записи для \(pet.name)")
-                        .font(Theme.Fonts.title)
-                    
-                    Text("Тут буде історія:")
-                        .padding(.top)
-                    Text("• Щеплення")
-                    Text("• Глистування")
-                    Text("• Обробка від бліх")
-                }
-            }
-            .navigationTitle("Медичні записи")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Закрити") {
-                        dismiss()
-                    }
-                }
-            }
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
         }
     }
 }
 
 // MARK: - Preview
-struct PetDetailView_Previews: PreviewProvider {
-    static var previews: some View {
-        NavigationView {
-            PetDetailView(pet: Pet(
-                name: "Мурчик",
-                species: "Кіт",
-                breed: "Британець",
-                gender: .male,
-                dateOfBirth: Date(),
-                furColor: "Сірий",
-                ownerID: "preview"
-            ))
-        }
+#Preview {
+    let container = Persistence.preview
+    let pet = try! container.mainContext.fetch(FetchDescriptor<Pet>()).first!
+    return NavigationStack {
+        PetDetailView(pet: pet)
     }
+    .modelContainer(container)
+    .environment(AppChrome())
 }

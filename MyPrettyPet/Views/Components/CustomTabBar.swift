@@ -6,80 +6,94 @@
 //
 
 import SwiftUI
+import Observation
 
-enum TabItem: String, CaseIterable {
-    case home = "house.fill"
-    case feeding = "fork.knife"
-    case medical = "cross.case.fill"
-    case settings = "gearshape.fill"
-    
+enum TabItem: CaseIterable {
+    case home, feeding, medical, settings
+
+    var icon: String {
+        switch self {
+        case .home: "house.fill"
+        case .feeding: "fork.knife"
+        case .medical: "cross.case.fill"
+        case .settings: "gearshape.fill"
+        }
+    }
+
     var title: String {
         switch self {
-        case .home: return "Головна"
-        case .feeding: return "Годування"
-        case .medical: return "Медичне"
-        case .settings: return "Налаштування"
+        case .home: "Головна"
+        case .feeding: "Годування"
+        case .medical: "Медичне"
+        case .settings: "Налаштування"
         }
     }
 }
 
+/// Плаваюча капсула: активна вкладка — біла «пігулка» з назвою, решта — лише іконки
 struct CustomTabBar: View {
     @Binding var selectedTab: TabItem
-    
+    @Namespace private var namespace
+
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(TabItem.allCases, id: \.self) { tab in
-                TabBarButton(
-                    tab: tab,
-                    isSelected: selectedTab == tab,
-                    action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            selectedTab = tab
+                let isSelected = tab == selectedTab
+
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 18, weight: .semibold))
+                        if isSelected {
+                            Text(tab.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                     }
-                )
+                    .foregroundColor(isSelected ? Theme.Colors.accent : Theme.Colors.secondary)
+                    .padding(.horizontal, isSelected ? 18 : 0)
+                    .frame(maxWidth: isSelected ? nil : .infinity)
+                    .frame(height: 50)
+                    .background {
+                        if isSelected {
+                            Capsule()
+                                .fill(Theme.Colors.cardBackground)
+                                .shadow(color: Theme.Colors.shadow, radius: 6, x: 0, y: 2)
+                                .matchedGeometryEffect(id: "selectedTab", in: namespace)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(.horizontal, Theme.Spacing.medium)
-        .padding(.vertical, Theme.Spacing.small)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: Theme.CornerRadius.large)
-        )
-        .padding(.horizontal, Theme.Spacing.medium)
-        .padding(.bottom, Theme.Spacing.small)
+        .padding(6)
+        .background(Theme.Colors.tabBarBackground, in: Capsule())
+        .shadow(color: Color.black.opacity(0.1), radius: 18, x: 0, y: 8)
+        .padding(.horizontal, Theme.Spacing.screen)
+        .padding(.bottom, 4)
     }
 }
 
-struct TabBarButton: View {
-    let tab: TabItem
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: tab.rawValue)
-                    .font(.system(size: 24))
-                    .foregroundColor(isSelected ? Theme.Colors.accent : Theme.Colors.secondary)
-                
-                Text(tab.title)
-                    .font(Theme.Fonts.caption)
-                    .foregroundColor(isSelected ? Theme.Colors.accent : Theme.Colors.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-    }
+// MARK: - App Chrome
+/// Дозволяє екранам ховати таббар (напр. картка тварини з власною кнопкою внизу)
+@Observable
+final class AppChrome {
+    var isTabBarHidden = false
 }
 
 // MARK: - Preview
-struct CustomTabBar_Previews: PreviewProvider {
-    static var previews: some View {
-        VStack {
-            Spacer()
-            CustomTabBar(selectedTab: .constant(.home))
-        }
-        .background(Color.gray.opacity(0.1))
+#Preview {
+    VStack {
+        Spacer()
+        CustomTabBar(selectedTab: .constant(.home))
     }
+    .background(Theme.Colors.background)
 }
